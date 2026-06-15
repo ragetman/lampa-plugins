@@ -4081,40 +4081,41 @@
                                     userlists.forEach(function(l) {
                                         if (userlistResults[l.id]) pending++;
                                     });
-                                    if (!pending) {
-                                        finishWithSurs();
-                                        return;
-                                    }
-                                    var lineSlots = new Array(userlists.length).fill(null);
+                                    if (!pending) { finishWithSurs(); return; }
+
+                                    var sortedWithData = [];
+                                    userlists.forEach(function(l) {
+                                        if (userlistResults[l.id]) sortedWithData.push(l);
+                                    });
+
+                                    var lineSlots = new Array(sortedWithData.length);
                                     var enriched = 0;
-                                    userlists.forEach(function(l, idx) {
-                                        if (!userlistResults[l.id]) {
-                                            enriched++;
-                                            if (enriched === pending) {
-                                                lineSlots.forEach(function(slot) {
-                                                    if (slot) lines.push(slot);
-                                                });
-                                                finishWithSurs();
-                                            }
-                                            return;
-                                        }
-                                        (function(listObj, entry, slotIdx) {
-                                            getTMDBDetailsSimple(entry.items, function(tmdbData) {
-                                                if (tmdbData && tmdbData.results && tmdbData.results.length) {
-                                                    var lineData = Lampa.Utils.addSource(tmdbData, 'myshows');
-                                                    lineData.title = listObj.title;
-                                                    lineData.onMore = function() {
-                                                        if (listObj && listObj.id) {
-                                                            Lampa.Activity.push({
-                                                                url: '',
-                                                                title: listObj.title,
-                                                                component: 'myshows_userlist',
-                                                                listId: listObj.id,
-                                                                page: 1
-                                                            });
+
+                                    sortedWithData.forEach(function(l, idx) {
+                                        var entry = userlistResults[l.id];
+                                        (function(listObj, listEntry, slotIdx) {
+                                            var listTotalPages = Math.ceil(listEntry.totalCount / PAGE_SIZE);
+                                            getTMDBDetailsSimple(listEntry.items.slice(0, PAGE_SIZE), function(result) {
+                                                if (result && result.results && result.results.length) {
+                                                    lineSlots[slotIdx] = {
+                                                        title: listObj.title,
+                                                        results: result.results,
+                                                        total_pages: listTotalPages,
+                                                        params: {
+                                                            module: Lampa.Maker.module('Line').only('Items', 'Create', 'More', 'Event'),
+                                                            emit: {
+                                                                onMore: function() {
+                                                                    Lampa.Activity.push({
+                                                                        url: '',
+                                                                        title: listObj.title,
+                                                                        component: 'myshows_userlist',
+                                                                        listId: listObj.id,
+                                                                        page: 1
+                                                                    });
+                                                                }
+                                                            }
                                                         }
                                                     };
-                                                    lineSlots[slotIdx] = lineData;
                                                 }
                                                 enriched++;
                                                 if (enriched === pending) {
