@@ -1,0 +1,59 @@
+name: sync and patch myshows
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v5
+
+      - name: download original from Igorek1986
+        run: |
+          curl -sSL --retry 3 --retry-delay 5 --fail \
+            https://raw.githubusercontent.com/Igorek1986/lampa-plugins/main/myshows.lite.js \
+            -o myshows/myshows-temp.js
+          echo "Downloaded $(wc -l < myshows/myshows-temp.js) lines"
+
+      - name: check for changes in original
+        id: check
+        run: |
+          HASH_NEW=$(md5sum myshows/myshows-temp.js | cut -d' ' -f1)
+          if [ -f myshows/.myshows-hash ] && [ "$(cat myshows/.myshows-hash)" = "$HASH_NEW" ]; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "Original unchanged — rebuild not needed"
+            rm myshows/myshows-temp.js
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Original changed — applying patch"
+            echo "$HASH_NEW" > myshows/.myshows-hash
+          fi
+
+      - name: apply patch
+        if: steps.check.outputs.changed == 'true'
+        run: python3 myshows/myshows-patch.py
+
+      - name: check output syntax
+        if: steps.check.outputs.changed == 'true'
+        run: node --check n-myshows.js && echo "Syntax OK"
+
+      - name: remove temp file
+        if: steps.check.outputs.changed == 'true'
+        run: rm myshows/myshows-temp.js
+
+      - name: commit result
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add n-myshows.js myshows/.myshows-hash
+          git commit -m "chore: sync upstream + apply patch [$(date -u +%Y-%m-%d)]"
+          git push
