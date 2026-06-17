@@ -540,11 +540,23 @@
         Lampa.Storage.set("myshows_password", getProfileSetting("myshows_password", ""), true);
         Lampa.Storage.set("myshows_cache_days", getProfileSetting("myshows_cache_days", DEFAULT_CACHE_DAYS), true);
         Lampa.Storage.set("myshows_use_np", getProfileSetting("myshows_use_np", "false"), true);
-        Lampa.Storage.set("myshows_badge_progress", getProfileSetting("myshows_badge_progress", true), true);
-        Lampa.Storage.set("myshows_badge_remaining", getProfileSetting("myshows_badge_remaining", true), true);
-        Lampa.Storage.set("myshows_badge_next", getProfileSetting("myshows_badge_next", true), true);
+        Lampa.Storage.set("myshows_badge_progress", localStorage.getItem("myshows_badge_progress") !== null ? localStorage.getItem("myshows_badge_progress") : true);
+        Lampa.Storage.set("myshows_badge_remaining", localStorage.getItem("myshows_badge_remaining") !== null ? localStorage.getItem("myshows_badge_remaining") : true);
+        Lampa.Storage.set("myshows_badge_next", localStorage.getItem("myshows_badge_next") !== null ? localStorage.getItem("myshows_badge_next") : true);
         Lampa.Storage.set("myshows_badge_style", getProfileSetting("myshows_badge_style", "1"), true);
         applyBadgeStyleAttr();
+        // Патч: применяем data-атрибуты скрытия значков
+        (function() {
+            var p = localStorage.getItem("myshows_badge_progress");
+            var r = localStorage.getItem("myshows_badge_remaining");
+            var n = localStorage.getItem("myshows_badge_next");
+            if (p !== null && !(p === true || p === "true")) document.body.setAttribute("data-hide-badge-progress", "1");
+            else document.body.removeAttribute("data-hide-badge-progress");
+            if (r !== null && !(r === true || r === "true")) document.body.setAttribute("data-hide-badge-remaining", "1");
+            else document.body.removeAttribute("data-hide-badge-remaining");
+            if (n !== null && !(n === true || n === "true")) document.body.setAttribute("data-hide-badge-next", "1");
+            else document.body.removeAttribute("data-hide-badge-next");
+        })();
     }
     function applyBadgeStyleAttr() {
         var v = getProfileSetting("myshows_badge_style", "1").toString();
@@ -570,7 +582,11 @@
                 description: "Просмотрено / всего серий, например: 5/12"
             },
             onChange: function(value) {
-                setProfileSetting("myshows_badge_progress", value === true || value === "true");
+                var boolVal = value === true || value === "true";
+                Lampa.Storage.set(getProfileKey("myshows_badge_progress"), boolVal ? "true" : "false");
+                Lampa.Storage.set("myshows_badge_progress", boolVal ? "true" : "false");
+                if (!boolVal) document.body.setAttribute("data-hide-badge-progress", "1");
+                else document.body.removeAttribute("data-hide-badge-progress");
             }
         });
         Lampa.SettingsApi.addParam({
@@ -585,7 +601,11 @@
                 description: "Количество непросмотренных серий"
             },
             onChange: function(value) {
-                setProfileSetting("myshows_badge_remaining", value === true || value === "true");
+                var boolVal = value === true || value === "true";
+                Lampa.Storage.set(getProfileKey("myshows_badge_remaining"), boolVal ? "true" : "false");
+                Lampa.Storage.set("myshows_badge_remaining", boolVal ? "true" : "false");
+                if (!boolVal) document.body.setAttribute("data-hide-badge-remaining", "1");
+                else document.body.removeAttribute("data-hide-badge-remaining");
             }
         });
         Lampa.SettingsApi.addParam({
@@ -600,7 +620,11 @@
                 description: "Номер следующего эпизода для просмотра, например S01E05"
             },
             onChange: function(value) {
-                setProfileSetting("myshows_badge_next", value === true || value === "true");
+                var boolVal = value === true || value === "true";
+                Lampa.Storage.set(getProfileKey("myshows_badge_next"), boolVal ? "true" : "false");
+                Lampa.Storage.set("myshows_badge_next", boolVal ? "true" : "false");
+                if (!boolVal) document.body.setAttribute("data-hide-badge-next", "1");
+                else document.body.removeAttribute("data-hide-badge-next");
             }
         });
         Lampa.SettingsApi.addParam({
@@ -1024,7 +1048,10 @@
             if (badgesPanel) {
                 [ "myshows_badge_progress", "myshows_badge_remaining", "myshows_badge_next" ].forEach(function(key) {
                     var el = badgesPanel.querySelector('select[data-name="' + key + '"]');
-                    if (el) el.value = getProfileSetting(key, true).toString();
+                    if (el) {
+                        var v = localStorage.getItem(key);
+                        el.value = (v !== null ? v : "true");
+                    }
                 });
                 var styleSelect = badgesPanel.querySelector('select[data-name="myshows_badge_style"]');
                 if (styleSelect) styleSelect.value = getProfileSetting("myshows_badge_style", "1").toString();
@@ -2796,6 +2823,14 @@
     function addProgressMarkerStyles() {
         var style = document.createElement("style");
         style.textContent = [ ".myshows-progress {", "    position: absolute; left: 0em; bottom: 0em;", "    padding: 0.2em 0.4em; font-size: 1.2em; border-radius: 0.5em;", "    font-weight: bold; z-index: 2; box-shadow: 0 2px 8px rgba(0,0,0,0.15);", "    background: #4CAF50; color: #fff;", "    transition: all 0.3s ease, transform 0.15s ease !important;", "    will-change: transform, color, background-color;", "}", "@keyframes digitFlip {", "    0%   { transform: translateY(0) scale(1); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }", "    50%  { transform: scale(1); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }", "    100% { transform: translateY(0) scale(1); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }", "}", "@keyframes pulse {", "    0%   { transform: scale(1); }", "    50%  { transform: scale(1); }", "    100% { transform: scale(1); }", "}", ".digit-animating { animation: digitFlip 0.6s ease; }", ".marker-update   { animation: pulse 0.6s ease; }", ".counter-animating { animation: counterPulse 0.8s ease; }", "@keyframes counterPulse {", "    0%   { transform: scale(1); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }", "    25%  { transform: scale(1); box-shadow: 0 4px 12px rgba(0,0,0,0.25); }", "    50%  { transform: scale(1); box-shadow: 0 3px 10px rgba(0,0,0,0.2); }", "    100% { transform: scale(1); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }", "}", ".myshows-remaining {", "    position: absolute; right: 0em; top: 0em;", "    padding: 0.2em 0.4em; font-size: 1.2em; border-radius: 1em;", "    font-weight: bold; z-index: 2;", "    background: rgba(0,0,0,0.5); color: #fff; transition: all 0.3s ease;", "}", ".myshows-next-episode {", "    position: absolute; left: 0em; bottom: 1.5em;", "    padding: 0.2em 0.4em; font-size: 1.2em; border-radius: 0.5em;", "    font-weight: bold; z-index: 2; box-shadow: 0 2px 8px rgba(0,0,0,0.15);", "    letter-spacing: 0.04em; line-height: 1.1;", "    background: #2196F3; color: #fff; transition: all 0.3s ease;", "}", ".myshows-explorer-next {", "    margin: 0 0 1em;", "    font-size: 1.15em; font-weight: 300;", "}", ".full-start-new__poster { position: relative; }", ".full-start-new__poster .myshows-progress,", ".full-start-new__poster .myshows-next-episode {", "    position: absolute; left: 0.5em; z-index: 3;", "}", ".full-start-new__poster .myshows-progress,", ".full-start-new__poster .myshows-remaining,", ".full-start-new__poster .myshows-next-episode {", "    transition: all 0.3s ease !important;", "    will-change: transform, color, background-color;", "}", ".full-start-new__poster .myshows-progress.digit-animating,", ".full-start-new__poster .myshows-remaining.digit-animating,", ".full-start-new__poster .myshows-next-episode.digit-animating {", "    animation: digitFlip 0.6s ease;", "}", ".full-start-new__poster .marker-update { animation: gentlePulse 0.6s ease; }", "@keyframes gentlePulse {", "    0%   { transform: scale(1); }", "    50%  { transform: scale(1); }", "    100% { transform: scale(1); }", "}", ".full-start-new__poster .myshows-progress    { bottom: 0.5em; }", ".full-start-new__poster .myshows-next-episode { bottom: 2em; }", "body.true--mobile.orientation--portrait .full-start-new__poster .myshows-progress    { bottom: 15em; }", "body.true--mobile.orientation--portrait .full-start-new__poster .myshows-next-episode { bottom: 17em; }", "body.true--mobile.orientation--landscape .full-start-new__poster .myshows-progress    { bottom: 2.5em; }", "body.true--mobile.orientation--landscape .full-start-new__poster .myshows-next-episode { bottom: 4em; }", "@media screen and (min-width: 580px) and (max-width: 1024px) {", "    body.true--mobile .full-start-new__poster .myshows-progress    { bottom: 2.5em; font-size: 1.1em; }", "    body.true--mobile .full-start-new__poster .myshows-next-episode { bottom: 4em;   font-size: 1.1em; }", "}", "body.glass--style.platform--browser .card .myshows-progress,", "body.glass--style.platform--nw .card .myshows-progress,", "body.glass--style.platform--apple .card .д-progress {", "    background-color: rgba(76,175,80,0.8);", "    -webkit-backdrop-filter: blur(1em); backdrop-filter: blur(1em);", "}", "body.glass--style.platform--browser .card .myshows-next-episode,", "body.glass--style.platform--nw .card .myshows-next-episode,", "body.glass--style.platform--apple .card .myshows-next-episode {", "    background-color: rgba(33,150,243,0.8);", "    -webkit-backdrop-filter: blur(1em); backdrop-filter: blur(1em);", "}", ".myshows-progress.marker-update,", ".myshows-next-episode.marker-update { font-weight: 900; animation: gentleAppear 0.4s ease; }", "@keyframes gentleAppear {", "    0%   { opacity: 0; transform: translateY(10px); }", "    100% { opacity: 1; transform: translateY(0); }", "}", "@keyframes gentlePulse {", "    0%   { transform: scale(1); }", "    50%  { transform: scale(1); }", "    100% { transform: scale(1); }", "}", ".scale-animation { animation: gentlePulse 0.6s ease; }", 'body[data-myshows-badge-style="2"] .card .myshows-next-episode,', 'body[data-myshows-badge-style="2"] .full-start-new__poster .myshows-next-episode {', "    left: 0; bottom: 0; border-radius: 0 0.83em;", "    background: rgba(0,0,0,0.5); box-shadow: none;", "}", 'body[data-myshows-badge-style="2"] .card .myshows-progress,', 'body[data-myshows-badge-style="2"] .full-start-new__poster .myshows-progress {', "    left: auto; right: 0; bottom: 0; border-radius: 0.83em 0;", "    background: rgba(0,0,0,0.5); box-shadow: none;", "}", 'body[data-myshows-badge-style="2"].glass--style .card .myshows-progress,', 'body[data-myshows-badge-style="2"].glass--style .card .myshows-next-episode {', "    background-color: rgba(0,0,0,0.5);", "    -webkit-backdrop-filter: none; backdrop-filter: none;", "}", 'body[data-myshows-badge-style="2"] .card .myshows-remaining,', 'body[data-myshows-badge-style="2"] .full-start-new__poster .myshows-remaining {', "    right: 0; top: 0; border-radius: 0 0.83em;", "}", 'body[data-myshows-badge-style="2"][data-status-badge-style="2"] .card .view--has-status .myshows-remaining {', "    top: 1.25em; border-radius: 0.83em 0 0 0.83em;", "}", 'body[data-myshows-badge-style="2"] .card .card__quality {', "    left: 0; border-radius: 0 0.75em 0.75em 0;", "}", 'body[data-myshows-badge-style="2"] .card .card__vote {', "    right: 0; bottom: 1.5em; left: auto; top: auto;", "    padding: 0.2em 0.4em; font-size: 1.2em; font-weight: bold;", "    background: rgba(0,0,0,0.5); color: #fff;", "    border-radius: 0.83em 0 0 0.83em;", "}", 'body[data-myshows-badge-style="2"].true--mobile.orientation--portrait .full-start-new__poster .myshows-next-episode { bottom: 15em; }', 'body[data-myshows-badge-style="2"].true--mobile.orientation--landscape .full-start-new__poster .myshows-next-episode { bottom: 2.5em; }', "@media screen and (min-width: 580px) and (max-width: 1024px) {", '    body[data-myshows-badge-style="2"].true--mobile .full-start-new__poster .myshows-next-episode { bottom: 2.5em; font-size: 1.1em; }', "}" ].join("\n");
+        // Патч: CSS для скрытия значков через data-атрибуты на body
+        var styleHide = document.createElement("style");
+        styleHide.textContent = [
+            "body[data-hide-badge-progress] .myshows-progress { display: none !important; }",
+            "body[data-hide-badge-remaining] .myshows-remaining { display: none !important; }",
+            "body[data-hide-badge-next] .myshows-next-episode { display: none !important; }"
+        ].join("\n");
+        document.head.appendChild(styleHide);
         document.head.appendChild(style);
     }
     function addMyShowsData(data, oncomplite) {
@@ -3994,7 +4029,7 @@
                             addLine("Непросмотренные сериалы (MyShows)", unwatchedShows.slice(0, PAGE_SIZE), totalPages, "myshows_unwatched");
                         }
                         function finishWithSurs() {
-                            // Standard rows — after custom lists
+                            // Стандартные ряды добавляются после пользовательских подборок
                             addLine("Хочу посмотреть", allData.watchlist && allData.watchlist.results, allData.watchlist && allData.watchlist.total_pages, "myshows_watchlist");
                             addLine("История", allData.watched && allData.watched.results, allData.watched && allData.watched.total_pages, "myshows_watched");
                             addLine("Бросил смотреть", allData.cancelled && allData.cancelled.results, allData.cancelled && allData.cancelled.total_pages, "myshows_cancelled");
@@ -4012,10 +4047,9 @@
                             finish();
                         }
 
-                        // Custom user lists — displayed right after Unwatched
-                        // ── List display order ────────────────────────────────
-                        // To change the order or add a new list —
-                        // edit this array in myshows-patch.py
+                        // Пользовательские подборки — сразу после «Непросмотренных сериалов»
+                        // Порядок отображения задаётся массивом USERLIST_ORDER.
+                        // Чтобы изменить порядок или добавить подборку — отредактируй этот массив в patch.py
                         var USERLIST_ORDER = [
                             'Планы. Фильмы',
                             'Планы. Сериалы',
@@ -4028,6 +4062,7 @@
                             return;
                         }
 
+                        // Сортируем по приоритету из USERLIST_ORDER, остальные — в конец
                         userlists.sort(function(a, b) {
                             var ai = USERLIST_ORDER.indexOf(a.title);
                             var bi = USERLIST_ORDER.indexOf(b.title);
@@ -4083,6 +4118,7 @@
                                     });
                                     if (!pending) { finishWithSurs(); return; }
 
+                                    // lineSlots фиксирует порядок при асинхронном TMDB-обогащении
                                     var sortedWithData = [];
                                     userlists.forEach(function(l) {
                                         if (userlistResults[l.id]) sortedWithData.push(l);
@@ -4216,6 +4252,7 @@
         addCategoryComponent("myshows_cancelled", Api.myshowsCancelled, true);
         addCategoryComponent("myshows_unwatched", Api.myshowsUnwatched, false);
 
+        // Компонент полного списка пользовательской подборки (открывается кнопкой «Ещё»)
         Lampa.Component.add('myshows_userlist', function(object) {
             var comp = Lampa.Maker.make('Category', object, function(module) {
                 return module.toggle(module.MASK.base, 'Pagination');
@@ -5187,6 +5224,20 @@
             if (IS_LAMPAC) ;
             initCurrentProfile();
             applyBadgeStyleAttr();
+            // Патч: синхронизируем Lampa.Storage из localStorage и применяем
+            // data-атрибуты скрытия значков сразу при старте плагина
+            ["myshows_badge_progress", "myshows_badge_remaining", "myshows_badge_next"].forEach(function(key) {
+                var v = localStorage.getItem(key);
+                if (v !== null) Lampa.Storage.set(key, v);
+            });
+            (function() {
+                var p = (localStorage.getItem("myshows_badge_progress") !== null ? localStorage.getItem("myshows_badge_progress") : true);
+                var r = (localStorage.getItem("myshows_badge_remaining") !== null ? localStorage.getItem("myshows_badge_remaining") : true);
+                var n = (localStorage.getItem("myshows_badge_next") !== null ? localStorage.getItem("myshows_badge_next") : true);
+                if (!(p === true || p === "true")) document.body.setAttribute("data-hide-badge-progress", "1");
+                if (!(r === true || r === "true")) document.body.setAttribute("data-hide-badge-remaining", "1");
+                if (!(n === true || n === "true")) document.body.setAttribute("data-hide-badge-next", "1");
+            })();
             registerNMSync();
             setTimeout(function() {
                 initBadgesSubComponent();
