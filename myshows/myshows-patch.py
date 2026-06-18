@@ -9,6 +9,7 @@
 # Патч 6    — CSS скрытия значков + инициализация при loadProfileSettings
 # Патч 7    — инициализация badge-атрибутов сразу при старте плагина
 # Патч 8    — корректное отображение состояния значков в UI настроек
+# Патч 9    — PAGE_SIZE 20→12 для Хочу посмотреть / Непросмотренные
 
 import sys
 
@@ -68,7 +69,7 @@ else:
 # ═══════════════════════════════════════════════════════════════════════════════
 # ПАТЧ 3 — переписываем блок buildLines:
 #   • подборки вставляются сразу после «Непросмотренных сериалов»
-#   • стандартные ряды (Хочу посмотреть / История / Бросил) — после подборок
+#   • стандартные ряды (Хочу посмотреть) — после подборок
 #   • порядок подборок задаётся массивом USERLIST_ORDER
 #   • слоты lineSlots гарантируют порядок при асинхронном TMDB-обогащении
 #   • кнопка «Ещё» передаёт listId в компонент myshows_userlist
@@ -92,8 +93,6 @@ P3_OLD = """                        addLine(\"Хочу посмотреть\", a
 P3_NEW = """                        function finishWithSurs() {
                             // Стандартные ряды добавляются после пользовательских подборок
                             addLine(\"Хочу посмотреть\", allData.watchlist && allData.watchlist.results, allData.watchlist && allData.watchlist.total_pages, \"myshows_watchlist\");
-                            addLine(\"История\", allData.watched && allData.watched.results, allData.watched && allData.watched.total_pages, \"myshows_watched\");
-                            addLine(\"Бросил смотреть\", allData.cancelled && allData.cancelled.results, allData.cancelled && allData.cancelled.total_pages, \"myshows_cancelled\");
                             if (typeof window.surs_getCustomButtonsRow === \"function\") {
                                 var sursParts = [];
                                 window.surs_getCustomButtonsRow(sursParts);
@@ -116,6 +115,7 @@ P3_NEW = """                        function finishWithSurs() {
                             'Планы. Сериалы',
                             'Планы. Аниме'
                         ];
+                        var USERLIST_PAGE_SIZE = 12;
 
                         var userlists = allData.userlists || [];
                         if (!userlists.length) {
@@ -191,12 +191,12 @@ P3_NEW = """                        function finishWithSurs() {
                                     sortedWithData.forEach(function(l, idx) {
                                         var entry = userlistResults[l.id];
                                         (function(listObj, listEntry, slotIdx) {
-                                            var listTotalPages = Math.ceil(listEntry.totalCount / PAGE_SIZE);
-                                            getTMDBDetailsSimple(listEntry.items.slice(0, PAGE_SIZE), function(result) {
+                                            var listTotalPages = Math.ceil(listEntry.totalCount / USERLIST_PAGE_SIZE);
+                                            getTMDBDetailsSimple(listEntry.items.slice(0, USERLIST_PAGE_SIZE), function(result) {
                                                 if (result && result.results && result.results.length) {
                                                     lineSlots[slotIdx] = {
                                                         title: listObj.title,
-                                                        results: result.results,
+                                                        results: result.results.slice(0, USERLIST_PAGE_SIZE),
                                                         total_pages: listTotalPages,
                                                         params: {
                                                             module: Lampa.Maker.module('Line').only('Items', 'Create', 'More', 'Event'),
@@ -239,6 +239,9 @@ else:
 # ═══════════════════════════════════════════════════════════════════════════════
 # ПАТЧ 4 — добавляем компонент myshows_userlist
 #           открывается кнопкой «Ещё» в ряду подборки
+#           Пагинация: список грузится один раз (один API-запрос), далее
+#           TMDB-обогащение и отдача по USERLIST_COMP_PAGE_SIZE элементов на страницу.
+#           onNext читает уже закэшированный _allItems без повторного API-запроса.
 # ═══════════════════════════════════════════════════════════════════════════════
 P4_OLD = """        addCategoryComponent(\"myshows_watchlist\", Api.myshowsWatchlist, true);
         addCategoryComponent(\"myshows_watched\", Api.myshowsWatched, true);
@@ -252,10 +255,57 @@ P4_NEW = """        addCategoryComponent(\"myshows_watchlist\", Api.myshowsWatch
         addCategoryComponent(\"myshows_unwatched\", Api.myshowsUnwatched, false);
 
         // Компонент полного списка пользовательской подборки (открывается кнопкой «Ещё»)
+        // Пагинация: список грузится один раз, страницы отдаются по USERLIST_COMP_PAGE_SIZE элементов.
+        // Lampa при прокрутке вниз мутирует object.page++ и вызывает onNext.
         Lampa.Component.add('myshows_userlist', function(object) {
+            var USERLIST_COMP_PAGE_SIZE = 12;
+            // Кэш сырых элементов подборки — грузится один раз в onCreate
+            var _allItems = null;
+
             var comp = Lampa.Maker.make('Category', object, function(module) {
                 return module.toggle(module.MASK.base, 'Pagination');
             });
+
+            function _parseMsItems(result) {
+                var items = [];
+                (result.movies || []).forEach(function(e) {
+                    var m = e.movie || e;
+                    if (m && m.id) items.push({
+                        myshowsId: m.id,
+                        title: m.title || m.titleOriginal,
+                        originalTitle: m.titleOriginal || m.title,
+                        year: m.year,
+                        type: 'movie',
+                        name: null
+                    });
+                });
+                (result.shows || []).forEach(function(e) {
+                    var s = e.show || e;
+                    if (s && s.id) items.push({
+                        myshowsId: s.id,
+                        title: s.title || s.titleOriginal,
+                        originalTitle: s.titleOriginal || s.title,
+                        year: s.year,
+                        type: 'show',
+                        name: s.title
+                    });
+                });
+                return items;
+            }
+
+            function _getPage(pageNum, allItems, callback) {
+                var start = (pageNum - 1) * USERLIST_COMP_PAGE_SIZE;
+                var pageItems = allItems.slice(start, start + USERLIST_COMP_PAGE_SIZE);
+                var totalPages = Math.ceil(allItems.length / USERLIST_COMP_PAGE_SIZE) || 1;
+                getTMDBDetailsSimple(pageItems, function(enriched) {
+                    if (enriched && enriched.results) {
+                        enriched.page = pageNum;
+                        enriched.total_pages = totalPages;
+                        enriched.total_results = allItems.length;
+                    }
+                    callback(enriched);
+                });
+            }
 
             comp.use({
                 onCreate: function() {
@@ -281,32 +331,14 @@ P4_NEW = """        addCategoryComponent(\"myshows_watchlist\", Api.myshowsWatch
                             self.activity.loader(false);
                             return;
                         }
-                        var result = listData.result;
-                        var items = [];
-                        (result.movies || []).forEach(function(e) {
-                            var m = e.movie || e;
-                            if (m && m.id) items.push({
-                                myshowsId: m.id,
-                                title: m.title || m.titleOriginal,
-                                originalTitle: m.titleOriginal || m.title,
-                                year: m.year,
-                                type: 'movie',
-                                name: null
-                            });
-                        });
-                        (result.shows || []).forEach(function(e) {
-                            var s = e.show || e;
-                            if (s && s.id) items.push({
-                                myshowsId: s.id,
-                                title: s.title || s.titleOriginal,
-                                originalTitle: s.titleOriginal || s.title,
-                                year: s.year,
-                                type: 'show',
-                                name: s.title
-                            });
-                        });
-
-                        getTMDBDetailsSimple(items, function(enriched) {
+                        _allItems = _parseMsItems(listData.result);
+                        if (!_allItems.length) {
+                            self.empty();
+                            self.activity.loader(false);
+                            return;
+                        }
+                        object.page = 1;
+                        _getPage(1, _allItems, function(enriched) {
                             if (enriched && enriched.results && enriched.results.length) {
                                 self.build(Lampa.Utils.addSource(enriched, 'myshows'));
                             } else {
@@ -314,6 +346,17 @@ P4_NEW = """        addCategoryComponent(\"myshows_watchlist\", Api.myshowsWatch
                             }
                             self.activity.loader(false);
                         });
+                    });
+                },
+
+                onNext: function(resolve, reject) {
+                    if (!_allItems) { reject(); return; }
+                    _getPage(object.page, _allItems, function(enriched) {
+                        if (enriched && enriched.results && enriched.results.length) {
+                            resolve(Lampa.Utils.addSource(enriched, 'myshows'));
+                        } else {
+                            reject();
+                        }
                     });
                 },
 
@@ -461,7 +504,7 @@ P6B_OLD = (
 
 P6B_NEW = (
     # Читаем из localStorage напрямую — Lampa.Storage с third arg=true
-    # конвертирует строку "false" в булево true (непустая строка = true)
+    # конвертирует строку "false" в булево true (непустая строка = truthy)
     '        Lampa.Storage.set("myshows_badge_progress", localStorage.getItem("myshows_badge_progress") !== null ? localStorage.getItem("myshows_badge_progress") : true);\n'
     '        Lampa.Storage.set("myshows_badge_remaining", localStorage.getItem("myshows_badge_remaining") !== null ? localStorage.getItem("myshows_badge_remaining") : true);\n'
     '        Lampa.Storage.set("myshows_badge_next", localStorage.getItem("myshows_badge_next") !== null ? localStorage.getItem("myshows_badge_next") : true);\n'
@@ -558,6 +601,48 @@ if P8_OLD in src:
     print('Patch 8 OK')
 else:
     errors.append('Patch 8: якорь не найден — badgesPanel forEach')
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ПАТЧ 9 — PAGE_SIZE 20→12 для Хочу посмотреть / Непросмотренные
+#   myshowsWatchlist использует PAGE_SIZE_W + внутренний PAGE_SIZE.
+#   myshowsUnwatched и buildLines — отдельные замены.
+# ═══════════════════════════════════════════════════════════════════════════════
+P9A_OLD = "        function myshowsWatchlist(object, oncomplite, onerror) {\n            var currentPage = object.page || 1;\n            var PAGE_SIZE_W = 20;"
+P9A_NEW = "        function myshowsWatchlist(object, oncomplite, onerror) {\n            var currentPage = object.page || 1;\n            var PAGE_SIZE_W = 12;"
+
+P9A2_OLD = '                        var cacheKey = "watchlist";\n                        if (!cachedShuffledItems[cacheKey]) {\n                            Lampa.Arrays.shuffle(allItems);\n                            cachedShuffledItems[cacheKey] = allItems.slice();\n                        } else allItems = cachedShuffledItems[cacheKey].slice();\n                        var PAGE_SIZE = 20;'
+P9A2_NEW = '                        var cacheKey = "watchlist";\n                        if (!cachedShuffledItems[cacheKey]) {\n                            Lampa.Arrays.shuffle(allItems);\n                            cachedShuffledItems[cacheKey] = allItems.slice();\n                        } else allItems = cachedShuffledItems[cacheKey].slice();\n                        var PAGE_SIZE = 12;'
+
+P9D_OLD = "        function myshowsUnwatched(object, oncomplite, onerror) {\n            var PAGE_SIZE = 20;"
+P9D_NEW = "        function myshowsUnwatched(object, oncomplite, onerror) {\n            var PAGE_SIZE = 12;"
+
+P9E_OLD = "                    function buildLines() {\n                        var lines = [];\n                        var PAGE_SIZE = 20;"
+P9E_NEW = "                    function buildLines() {\n                        var lines = [];\n                        var PAGE_SIZE = 12;"
+
+if P9A_OLD in src:
+    src = src.replace(P9A_OLD, P9A_NEW, 1)
+    print('Patch 9a OK')
+else:
+    errors.append('Patch 9a: якорь не найден — myshowsWatchlist PAGE_SIZE_W')
+
+if P9A2_OLD in src:
+    src = src.replace(P9A2_OLD, P9A2_NEW, 1)
+    print('Patch 9a2 OK')
+else:
+    errors.append('Patch 9a2: якорь не найден — _doFetchWatchlist inner PAGE_SIZE')
+
+if P9D_OLD in src:
+    src = src.replace(P9D_OLD, P9D_NEW, 1)
+    print('Patch 9d OK')
+else:
+    errors.append('Patch 9d: якорь не найден — myshowsUnwatched PAGE_SIZE')
+
+if P9E_OLD in src:
+    src = src.replace(P9E_OLD, P9E_NEW, 1)
+    print('Patch 9e OK')
+else:
+    errors.append('Patch 9e: якорь не найден — buildLines PAGE_SIZE')
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
