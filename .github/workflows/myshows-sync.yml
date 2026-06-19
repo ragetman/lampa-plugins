@@ -23,18 +23,36 @@ jobs:
             -o myshows/myshows-temp.js
           echo "Скачано $(wc -l < myshows/myshows-temp.js) строк"
 
-      - name: проверить наличие изменений в оригинале
+      - name: проверить наличие изменений в оригинале или патче
         id: check
         run: |
           HASH_NEW=$(md5sum myshows/myshows-temp.js | cut -d' ' -f1)
+          PATCH_HASH_NEW=$(md5sum myshows/myshows-patch.py | cut -d' ' -f1)
+
+          ORIGINAL_CHANGED=true
           if [ -f myshows/.myshows-hash ] && [ "$(cat myshows/.myshows-hash)" = "$HASH_NEW" ]; then
+            ORIGINAL_CHANGED=false
+          fi
+
+          PATCH_CHANGED=true
+          if [ -f myshows/.patch-hash ] && [ "$(cat myshows/.patch-hash)" = "$PATCH_HASH_NEW" ]; then
+            PATCH_CHANGED=false
+          fi
+
+          if [ "$ORIGINAL_CHANGED" = "false" ] && [ "$PATCH_CHANGED" = "false" ]; then
             echo "changed=false" >> $GITHUB_OUTPUT
-            echo "Оригинал не изменился — пересборка не нужна"
+            echo "Оригинал и патч не изменились — пересборка не нужна"
             rm myshows/myshows-temp.js
           else
             echo "changed=true" >> $GITHUB_OUTPUT
-            echo "Оригинал изменился — применяем патч"
+            if [ "$ORIGINAL_CHANGED" = "true" ]; then
+              echo "Оригинал изменился — применяем патч"
+            fi
+            if [ "$PATCH_CHANGED" = "true" ]; then
+              echo "Патч изменился — пересобираем"
+            fi
             echo "$HASH_NEW" > myshows/.myshows-hash
+            echo "$PATCH_HASH_NEW" > myshows/.patch-hash
           fi
 
       - name: применить патч
@@ -54,6 +72,6 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add n-myshows.js myshows/.myshows-hash
+          git add n-myshows.js myshows/.myshows-hash myshows/.patch-hash
           git commit -m "chore: sync upstream + apply patch [$(date -u +%Y-%m-%d)]"
           git push
