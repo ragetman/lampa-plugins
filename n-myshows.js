@@ -3649,7 +3649,7 @@
     function ApiMyShows() {
         function myshowsWatchlist(object, oncomplite, onerror) {
             var currentPage = object.page || 1;
-            var PAGE_SIZE_W = 20;
+            var PAGE_SIZE_W = 12;
             var startProfile = getProfileId();
             if (useNpServer()) {
                 if (object.forceRefresh) {
@@ -3709,7 +3709,7 @@
                             Lampa.Arrays.shuffle(allItems);
                             cachedShuffledItems[cacheKey] = allItems.slice();
                         } else allItems = cachedShuffledItems[cacheKey].slice();
-                        var PAGE_SIZE = 20;
+                        var PAGE_SIZE = 12;
                         var currentPage = object.page || 1;
                         var totalPages = Math.ceil(allItems.length / PAGE_SIZE);
                         var start = (currentPage - 1) * PAGE_SIZE;
@@ -3886,7 +3886,7 @@
             }
         }
         function myshowsUnwatched(object, oncomplite, onerror) {
-            var PAGE_SIZE = 20;
+            var PAGE_SIZE = 12;
             var currentPage = object.page || 1;
             var cacheKey = "unwatched_raw";
             if (useNpServer()) {
@@ -3997,7 +3997,7 @@
                     });
                     function buildLines() {
                         var lines = [];
-                        var PAGE_SIZE = 20;
+                        var PAGE_SIZE = 12;
                         function addLine(title, results, totalPages, moreComponent) {
                             if (!results || !results.length) return;
                             lines.push({
@@ -4031,8 +4031,6 @@
                         function finishWithSurs() {
                             // Стандартные ряды добавляются после пользовательских подборок
                             addLine("Хочу посмотреть", allData.watchlist && allData.watchlist.results, allData.watchlist && allData.watchlist.total_pages, "myshows_watchlist");
-                            addLine("История", allData.watched && allData.watched.results, allData.watched && allData.watched.total_pages, "myshows_watched");
-                            addLine("Бросил смотреть", allData.cancelled && allData.cancelled.results, allData.cancelled && allData.cancelled.total_pages, "myshows_cancelled");
                             if (typeof window.surs_getCustomButtonsRow === "function") {
                                 var sursParts = [];
                                 window.surs_getCustomButtonsRow(sursParts);
@@ -4055,6 +4053,7 @@
                             'Планы. Сериалы',
                             'Планы. Аниме'
                         ];
+                        var USERLIST_PAGE_SIZE = 12;
 
                         var userlists = allData.userlists || [];
                         if (!userlists.length) {
@@ -4130,12 +4129,12 @@
                                     sortedWithData.forEach(function(l, idx) {
                                         var entry = userlistResults[l.id];
                                         (function(listObj, listEntry, slotIdx) {
-                                            var listTotalPages = Math.ceil(listEntry.totalCount / PAGE_SIZE);
-                                            getTMDBDetailsSimple(listEntry.items.slice(0, PAGE_SIZE), function(result) {
+                                            var listTotalPages = Math.ceil(listEntry.totalCount / USERLIST_PAGE_SIZE);
+                                            getTMDBDetailsSimple(listEntry.items.slice(0, USERLIST_PAGE_SIZE), function(result) {
                                                 if (result && result.results && result.results.length) {
                                                     lineSlots[slotIdx] = {
                                                         title: listObj.title,
-                                                        results: result.results,
+                                                        results: result.results.slice(0, USERLIST_PAGE_SIZE),
                                                         total_pages: listTotalPages,
                                                         params: {
                                                             module: Lampa.Maker.module('Line').only('Items', 'Create', 'More', 'Event'),
@@ -4253,10 +4252,57 @@
         addCategoryComponent("myshows_unwatched", Api.myshowsUnwatched, false);
 
         // Компонент полного списка пользовательской подборки (открывается кнопкой «Ещё»)
+        // Пагинация: список грузится один раз, страницы отдаются по USERLIST_COMP_PAGE_SIZE элементов.
+        // Lampa при прокрутке вниз мутирует object.page++ и вызывает onNext.
         Lampa.Component.add('myshows_userlist', function(object) {
+            var USERLIST_COMP_PAGE_SIZE = 12;
+            // Кэш сырых элементов подборки — грузится один раз в onCreate
+            var _allItems = null;
+
             var comp = Lampa.Maker.make('Category', object, function(module) {
                 return module.toggle(module.MASK.base, 'Pagination');
             });
+
+            function _parseMsItems(result) {
+                var items = [];
+                (result.movies || []).forEach(function(e) {
+                    var m = e.movie || e;
+                    if (m && m.id) items.push({
+                        myshowsId: m.id,
+                        title: m.title || m.titleOriginal,
+                        originalTitle: m.titleOriginal || m.title,
+                        year: m.year,
+                        type: 'movie',
+                        name: null
+                    });
+                });
+                (result.shows || []).forEach(function(e) {
+                    var s = e.show || e;
+                    if (s && s.id) items.push({
+                        myshowsId: s.id,
+                        title: s.title || s.titleOriginal,
+                        originalTitle: s.titleOriginal || s.title,
+                        year: s.year,
+                        type: 'show',
+                        name: s.title
+                    });
+                });
+                return items;
+            }
+
+            function _getPage(pageNum, allItems, callback) {
+                var start = (pageNum - 1) * USERLIST_COMP_PAGE_SIZE;
+                var pageItems = allItems.slice(start, start + USERLIST_COMP_PAGE_SIZE);
+                var totalPages = Math.ceil(allItems.length / USERLIST_COMP_PAGE_SIZE) || 1;
+                getTMDBDetailsSimple(pageItems, function(enriched) {
+                    if (enriched && enriched.results) {
+                        enriched.page = pageNum;
+                        enriched.total_pages = totalPages;
+                        enriched.total_results = allItems.length;
+                    }
+                    callback(enriched);
+                });
+            }
 
             comp.use({
                 onCreate: function() {
@@ -4282,32 +4328,14 @@
                             self.activity.loader(false);
                             return;
                         }
-                        var result = listData.result;
-                        var items = [];
-                        (result.movies || []).forEach(function(e) {
-                            var m = e.movie || e;
-                            if (m && m.id) items.push({
-                                myshowsId: m.id,
-                                title: m.title || m.titleOriginal,
-                                originalTitle: m.titleOriginal || m.title,
-                                year: m.year,
-                                type: 'movie',
-                                name: null
-                            });
-                        });
-                        (result.shows || []).forEach(function(e) {
-                            var s = e.show || e;
-                            if (s && s.id) items.push({
-                                myshowsId: s.id,
-                                title: s.title || s.titleOriginal,
-                                originalTitle: s.titleOriginal || s.title,
-                                year: s.year,
-                                type: 'show',
-                                name: s.title
-                            });
-                        });
-
-                        getTMDBDetailsSimple(items, function(enriched) {
+                        _allItems = _parseMsItems(listData.result);
+                        if (!_allItems.length) {
+                            self.empty();
+                            self.activity.loader(false);
+                            return;
+                        }
+                        object.page = 1;
+                        _getPage(1, _allItems, function(enriched) {
                             if (enriched && enriched.results && enriched.results.length) {
                                 self.build(Lampa.Utils.addSource(enriched, 'myshows'));
                             } else {
@@ -4315,6 +4343,17 @@
                             }
                             self.activity.loader(false);
                         });
+                    });
+                },
+
+                onNext: function(resolve, reject) {
+                    if (!_allItems) { reject(); return; }
+                    _getPage(object.page, _allItems, function(enriched) {
+                        if (enriched && enriched.results && enriched.results.length) {
+                            resolve(Lampa.Utils.addSource(enriched, 'myshows'));
+                        } else {
+                            reject();
+                        }
                     });
                 },
 
