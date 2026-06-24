@@ -470,7 +470,7 @@ else:
 P6A_OLD = (
     '        document.head.appendChild(style);\n'
     '    }\n'
-    '    function addMyShowsData(data, oncomplite) {'
+    '    function parseAirDate(airDate) {'
 )
 
 P6A_NEW = (
@@ -484,14 +484,14 @@ P6A_NEW = (
     '        document.head.appendChild(styleHide);\n'
     '        document.head.appendChild(style);\n'
     '    }\n'
-    '    function addMyShowsData(data, oncomplite) {'
+    '    function parseAirDate(airDate) {'
 )
 
 if P6A_OLD in src:
     src = src.replace(P6A_OLD, P6A_NEW, 1)
     print('Patch 6a OK')
 else:
-    errors.append('Patch 6a: якорь не найден — addProgressMarkerStyles appendChild')
+    errors.append('Patch 6a: якорь не найден — addProgressMarkerStyles appendChild / parseAirDate')
 
 P6B_OLD = (
     '        Lampa.Storage.set("myshows_badge_progress", getProfileSetting("myshows_badge_progress", true), true);\n'
