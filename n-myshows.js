@@ -18,9 +18,12 @@
     var syncInProgress = false;
     var checkedEpisodes = {};
     var checkedMovies = {};
+    var _pendingWatchedShows = {};
     var _unwatchedEpisodeIds = {};
     var _unwatchedEpisodeIdsReady = false;
     var _unwatchedEpisodeIdsProfile = null;
+    var _myShowsLine = null;
+    var _myShowsDirty = false;
     var cardStatusCache = {};
     function cardStatusKey(tmdbId, isMovie) {
         return (tmdbId ? String(tmdbId) : "0") + ":" + (isMovie ? "movie" : "tv");
@@ -44,17 +47,22 @@
             return;
         }
         watchingTransitionInFlight[key] = true;
+        if (key) _pendingWatchedShows[key] = true;
         setMyShowsStatus(card, "watching", function(success) {
             watchingTransitionInFlight[key] = false;
-            if (success) setCardStatusCache(card.id, false, "watching");
+            if (success) {
+                setCardStatusCache(card.id, false, "watching");
+                _myShowsDirty = true;
+                addUnwatchedTraces(card);
+            }
             if (callback) callback(success);
         });
     }
     var myshows_icon = '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="7" width="18" height="12" rx="3" style="fill:none;stroke:currentColor;stroke-width:2"/><line x1="12" y1="5" x2="7" y2="1" style="fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round"/><line x1="12" y1="5" x2="17" y2="1" style="fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round"/><circle cx="12" cy="6" r="1" style="fill:currentColor;stroke:none"/></svg>';
-    var watch_icon = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" fill="currentColor"/></svg>';
-    var later_icon = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" fill="currentColor"/></svg>';
-    var remove_icon = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" fill="currentColor"/></svg>';
-    var cancelled_icon = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11H7v-2h10v2z" fill="currentColor"/></svg>';
+    var watch_icon = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/></svg>';
+    var later_icon = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M8 12l3 3 5-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    var remove_icon = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M9 9l6 6M15 9l-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+    var cancelled_icon = '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M8 12h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
     var IS_LAMPAC = null;
     function isNpConnected() {
         return !!window.IS_NP;
@@ -1209,6 +1217,14 @@
             callback(success);
         });
     }
+    function unCheckEpisodeMyShows(episodeId, callback) {
+        makeMyShowsJSONRPCRequest("manage.UnCheckEpisode", {
+            id: episodeId,
+            rating: 0
+        }, function(success, data) {
+            callback(success);
+        });
+    }
     function npSetStatus(myshowsId, tmdbId, mediaType, npCacheType) {
         if (!useNpServer()) {
             getStorageMode(), window.IS_NP;
@@ -1331,7 +1347,9 @@
                 _unwatchedEpisodeIds = newUnwatchedIds;
                 _unwatchedEpisodeIdsReady = true;
                 _unwatchedEpisodeIdsProfile = startProfile;
+                _pendingWatchedShows = {};
                 Object.keys(newUnwatchedIds).length;
+                scheduleEpisodeBadgeDecorate();
             }
             for (var showId in showsData) {
                 var showData = showsData[showId];
@@ -1601,6 +1619,9 @@
                 tmdbId: tmdbKey,
                 showId: showId || null,
                 hash: hash,
+                seasonNumber: ep.seasonNumber,
+                episodeNumber: ep.episodeNumber,
+                airDate: ep.airDate || ep.airDateUTC || null,
                 timestamp: Date.now()
             };
         }
@@ -1678,6 +1699,7 @@
         var tmdbKey = tmdbId ? String(tmdbId) : "";
         var map = Lampa.Storage.get(MAP_KEY, {});
         if (tmdbKey) for (var h in map) if (map.hasOwnProperty(h) && map[h] && String(map[h].tmdbId) === tmdbKey) {
+            if (map[h].seasonNumber === void 0 || map[h].airDate === void 0) break;
             callback(map);
             return;
         }
@@ -1785,6 +1807,18 @@
         var currentStatus = getCardStatusCache(card.id, false);
         var alreadyWatching = currentStatus === "watching";
         var isFirstEpisode = hash === firstEpisodeHash;
+        if (percent === 0 && currentStatus === "watching") {
+            isEpisodeUnwatched(episodeId, function(unwatched, known) {
+                if (!known || unwatched) return;
+                unCheckEpisodeMyShows(episodeId, function(success) {
+                    if (!success) return;
+                    delete checkedEpisodes[episodeId];
+                    _unwatchedEpisodeIds[parseInt(episodeId)] = true;
+                    applyEpisodeMarkLocally(card, episodeId, false);
+                });
+            });
+            return;
+        }
         if (isFirstEpisode && (percent >= addThreshold || addThreshold === 0) && !alreadyWatching) ensureWatchingStatus(card, "S1E1 percent=" + percent, function(success) {
             cachedShuffledItems = {};
             if (success && percent < minProgress) {
@@ -1801,7 +1835,7 @@
                     checkedEpisodes[episodeId] = true;
                     delete _unwatchedEpisodeIds[parseInt(episodeId)];
                     if (!alreadyWatching) ensureWatchingStatus(card, 'отметка серии при статусе "' + currentStatus + '"', function() {});
-                    fetchFromMyShowsAPI(function(data) {});
+                    applyEpisodeMarkLocally(card, episodeId, true);
                 });
             };
             if (currentStatus === "watching") isEpisodeUnwatched(episodeId, function(unwatched, known) {
@@ -1814,7 +1848,10 @@
         }
     }
     function initTimelineListener() {
-        if (window.Lampa && Lampa.Timeline && Lampa.Timeline.listener) Lampa.Timeline.listener.follow("update", processTimelineUpdate);
+        if (window.Lampa && Lampa.Timeline && Lampa.Timeline.listener) {
+            Lampa.Timeline.listener.follow("update", processTimelineUpdate);
+            Lampa.Timeline.listener.follow("view", scheduleEpisodeBadgeDecorate);
+        }
     }
     function autoSetupToken() {
         var token = getProfileSetting("myshows_token", "");
@@ -1862,6 +1899,11 @@
                     _populateProgressMap(shows);
                     cachedResult.shows = shows;
                     callback(cachedResult);
+                    setTimeout(function() {
+                        fetchFromMyShowsAPI(function(freshResult) {
+                            if (freshResult && freshResult.shows && cachedResult.shows) updateUIIfNeeded(cachedResult.shows, freshResult.shows);
+                        });
+                    }, getRefreshDelay());
                 } else fetchFromMyShowsAPI(function(freshResult) {
                     callback(freshResult || {
                         shows: []
@@ -1912,9 +1954,8 @@
         newShows.forEach(function(newShow) {
             if (!findInArray(newShow, oldShows)) {
                 var showName = newShow.original_name || newShow.name || newShow.title || "";
-                newShow.myshowsId;
                 var existingCard = findCardInMyShowsSection(showName, newShow.myshowsId);
-                if (!existingCard) insertNewCardIntoMyShowsSection(newShow); else {
+                if (existingCard) {
                     existingCard.card_data = existingCard.card_data || {};
                     existingCard.card_data.progress_marker = newShow.progress_marker;
                     existingCard.card_data.next_episode = newShow.next_episode;
@@ -2476,10 +2517,10 @@
             var attempts = 0;
             (function tryInsert() {
                 var act = Lampa.Activity.active && Lampa.Activity.active();
-                if (!act || !act.movie || String(act.movie.id) !== String(movie.id)) return;
-                var cardEl = document.querySelector(".activity--active .explorer-card");
-                if (!cardEl) {
-                    if (nextEpisode && ++attempts < 10) setTimeout(tryInsert, 300);
+                var actOk = act && act.movie && String(act.movie.id) === String(movie.id);
+                var cardEl = actOk ? document.querySelector(".activity--active .explorer-card") : null;
+                if (!actOk || !cardEl) {
+                    if (++attempts < 12) setTimeout(tryInsert, 300);
                     return;
                 }
                 var old = cardEl.querySelector(".myshows-explorer-next");
@@ -2502,12 +2543,18 @@
         if (!act || act.component === "full" || !act.movie) return;
         var movie = act.movie;
         setTimeout(function() {
-            addNextEpisodeToExplorer(movie);
+            fetchFromMyShowsAPI(function() {
+                addNextEpisodeToExplorer(movie);
+            });
         }, 3e3);
     });
     Lampa.Listener.follow("activity", function(event) {
         event.type, event.component;
         if (event.type === "start" && event.component !== "full" && event.object && event.object.movie) addNextEpisodeToExplorer(event.object.movie);
+        if (event.type === "start" && (event.component === "main" || event.component === "category") && _myShowsDirty) {
+            _myShowsDirty = false;
+            setTimeout(reconcileMyShowsLine, 100);
+        }
         if (event.type === "start" && event.component === "full") {
             var currentCard = event.object && event.object.card;
             if (currentCard) {
@@ -2520,7 +2567,9 @@
                 if (previousCard && (previousCard.original_name || previousCard.original_title || previousCard.title) === originalName && wasWatching) {
                     var isSerial = currentCard.number_of_seasons > 0 || currentCard.seasons;
                     setTimeout(function() {
-                        refreshFullCardStatus(isSerial, originalName, currentCard);
+                        fetchFromMyShowsAPI(function() {
+                            refreshFullCardStatus(isSerial, originalName, currentCard);
+                        });
                     }, 3e3);
                 }
             }
@@ -2534,13 +2583,15 @@
                 var lastMyshowsId = lastCard.myshowsId;
                 Lampa.Storage.set("myshows_was_watching", false);
                 setTimeout(function() {
-                    var needle = lastMyshowsId || originalName;
-                    findShowInCache("unwatched_serials", "shows", needle, function(foundShow) {
-                        if (foundShow) {
-                            var existingCard = findCardInMyShowsSection(originalName, foundShow.myshowsId);
-                            if (existingCard && foundShow.progress_marker) updateAllMyShowsCards(originalName, foundShow.myshowsId, foundShow.progress_marker, foundShow.next_episode, foundShow.remaining); else if (!existingCard) insertNewCardIntoMyShowsSection(foundShow);
-                        } else updateCompletedShowCard(originalName);
-                    }, lastCard);
+                    fetchFromMyShowsAPI(function() {
+                        var needle = lastMyshowsId || originalName;
+                        findShowInCache("unwatched_serials", "shows", needle, function(foundShow) {
+                            if (foundShow) {
+                                var existingCard = findCardInMyShowsSection(originalName, foundShow.myshowsId);
+                                if (existingCard && foundShow.progress_marker) updateAllMyShowsCards(originalName, foundShow.myshowsId, foundShow.progress_marker, foundShow.next_episode, foundShow.remaining); else if (!existingCard) insertNewCardIntoMyShowsSection(foundShow);
+                            } else updateCompletedShowCard(originalName);
+                        }, lastCard);
+                    });
                 }, 3e3);
             } else if (currentCard) {
                 var originalName = currentCard.original_name || currentCard.original_title || currentCard.title;
@@ -2569,6 +2620,68 @@
         var openCard = active.card_data || active.card || active.movie;
         if (!openCard || !openCard.id) return true;
         return String(openCard.id) === String(card.id);
+    }
+    function computeNextUnwatchedEpisode(card) {
+        var tmdbKey = card && card.id ? String(card.id) : "";
+        if (!tmdbKey) return;
+        var map = Lampa.Storage.get(MAP_KEY, {});
+        var best = null, hasData = false;
+        for (var k in map) {
+            if (!map.hasOwnProperty(k)) continue;
+            var e = map[k];
+            if (!e || String(e.tmdbId) !== tmdbKey) continue;
+            if (e.seasonNumber === void 0 || e.episodeNumber === void 0) continue;
+            hasData = true;
+            if (!_unwatchedEpisodeIds[parseInt(e.episodeId)]) continue;
+            if (!best || e.seasonNumber < best.seasonNumber || e.seasonNumber === best.seasonNumber && e.episodeNumber < best.episodeNumber) best = e;
+        }
+        if (!hasData) return;
+        if (!best) return null;
+        return "S" + padTwo(best.seasonNumber) + "/E" + padTwo(best.episodeNumber);
+    }
+    function applyEpisodeMarkLocally(card, episodeId, watched) {
+        episodeId = parseInt(episodeId);
+        scheduleEpisodeBadgeDecorate();
+        loadCacheFromServer("unwatched_serials", "shows", function(result) {
+            var arr = result && result.shows;
+            if (!arr) return;
+            var show = matchShowInArray(arr, card);
+            if (!show || !show.progress_marker || show.progress_marker.indexOf("/") === -1) return;
+            var pp = show.progress_marker.split("/");
+            var watchedCount = parseInt(pp[0], 10);
+            var released = parseInt(pp[1], 10);
+            if (isNaN(watchedCount) || isNaN(released) || !released) return;
+            if (watched && show.unwatchedEpisodes && show.unwatchedEpisodes.length) show.unwatchedEpisodes = show.unwatchedEpisodes.filter(function(e) {
+                return e && parseInt(e.id) !== episodeId;
+            });
+            watchedCount += watched ? 1 : -1;
+            if (watchedCount < 0) watchedCount = 0;
+            if (watchedCount > released) watchedCount = released;
+            show.progress_marker = watchedCount + "/" + released;
+            show.watched_count = watchedCount;
+            show.remaining = released - watchedCount;
+            show.unwatchedCount = show.remaining;
+            var showName = card.original_name || card.original_title || card.title;
+            if (watched && show.remaining <= 0) {
+                var idx = arr.indexOf(show);
+                if (idx > -1) arr.splice(idx, 1);
+                saveCacheToServer({
+                    shows: arr
+                }, "unwatched_serials", function() {}, getProfileId());
+                if (isSameFullCardOpen(card)) completeFullCardMarkers(card);
+                updateCompletedShowCard(showName, show.myshowsId);
+                return;
+            }
+            var nextEp = computeNextUnwatchedEpisode(card);
+            if (nextEp !== void 0) show.next_episode = nextEp;
+            saveCacheToServer({
+                shows: arr
+            }, "unwatched_serials", function() {}, getProfileId());
+            if (isSameFullCardOpen(card)) updateFullCardMarkers(show);
+            updateAllMyShowsCards(showName, show.myshowsId, show.progress_marker, show.next_episode, show.remaining);
+            var act = Lampa.Activity.active && Lampa.Activity.active();
+            if (act && act.movie && act.component !== "full") addNextEpisodeToExplorer(card);
+        });
     }
     function refreshFullCardStatus(isSerial, originalName, currentCard) {
         if (!originalName) return;
@@ -2663,6 +2776,7 @@
     }
     function removeUnwatchedTraces(card) {
         if (!card) return;
+        _myShowsDirty = true;
         var showName = card.original_name || card.original_title || card.title || card.name;
         var myshowsId = card.myshowsId;
         var poster = $(".full-start-new__poster")[0];
@@ -2682,11 +2796,88 @@
             var parentSection = cardEl.closest(".items-line");
             var allCards = parentSection ? parentSection.querySelectorAll(".card") : [];
             var idx = [].slice.call(allCards).indexOf(cardEl);
+            if (_myShowsLine) {
+                var prevMain = neighborCard(allCards, idx);
+                if (prevMain) _myShowsLine.last = prevMain;
+            }
             removeCompletedCard(cardEl, showName, parentSection, idx);
         }
+        removeShowCardFromActiveView(card);
+    }
+    function reconcileMyShowsLine() {
+        var section = findMyShowsSection();
+        if (!section) return;
+        loadCacheFromServer("unwatched_serials", "shows", function(res) {
+            if (!findMyShowsSection()) return;
+            var shows = res && res.shows ? res.shows : [];
+            var moreBtn = section.querySelector(".card-more");
+            var cards = section.querySelectorAll(".card");
+            for (var i = 0; i < cards.length; i++) {
+                var el = cards[i];
+                if (!el.card_data || el.dataset && el.dataset.removing === "true") continue;
+                var stale = true;
+                for (var j = 0; j < shows.length; j++) if (sameShow(shows[j], el.card_data)) {
+                    stale = false;
+                    break;
+                }
+                var afterMore = moreBtn && moreBtn.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING;
+                if (stale || afterMore) {
+                    el.dataset.removing = "true";
+                    var all = section.querySelectorAll(".card");
+                    var idx = [].slice.call(all).indexOf(el);
+                    getCardName(el.card_data);
+                    removeCompletedCard(el, getCardName(el.card_data), section, idx);
+                }
+            }
+        });
+    }
+    function neighborCard(cards, i) {
+        for (var p = i - 1; p >= 0; p--) if (cards[p] && !(cards[p].dataset && cards[p].dataset.removing === "true")) return cards[p];
+        for (var n = i + 1; n < cards.length; n++) if (cards[n] && !(cards[n].dataset && cards[n].dataset.removing === "true")) return cards[n];
+        return null;
+    }
+    function removeShowCardFromActiveView(card) {
+        if (!Lampa.Activity || !Lampa.Activity.all) return;
+        var acts = Lampa.Activity.all() || [];
+        var activeComp = Lampa.Activity.active && Lampa.Activity.active() && Lampa.Activity.active().component || "";
+        var name = card.original_name || card.original_title || card.title || card.name;
+        acts.forEach(function(a) {
+            if (!a || a.component !== "myshows_unwatched" && a.component !== "myshows_all") return;
+            var render = a.activity && a.activity.render && a.activity.render(true);
+            var dom = render && (render[0] || render);
+            if (!dom || !dom.querySelectorAll) return;
+            var isActivePage = a.component === activeComp;
+            var cards = dom.querySelectorAll(".card");
+            for (var i = 0; i < cards.length; i++) {
+                if (cards[i].dataset && cards[i].dataset.removing === "true") continue;
+                if (sameShow(cards[i].card_data, card)) {
+                    cards[i].dataset.removing = "true";
+                    a.component;
+                    if (isActivePage) {
+                        var cont = cards[i].parentNode;
+                        var all = cont ? cont.querySelectorAll(".card") : [];
+                        var idx = [].slice.call(all).indexOf(cards[i]);
+                        removeCompletedCard(cards[i], name, cont, idx);
+                    } else {
+                        var prevDom = neighborCard(cards, i);
+                        var comp = a.activity && a.activity.component;
+                        if (prevDom && comp) comp.last = prevDom;
+                        (function(el) {
+                            el.style.transition = "opacity 0.4s ease, transform 0.4s ease";
+                            el.style.opacity = "0";
+                            el.style.transform = "translateY(10px)";
+                            setTimeout(function() {
+                                if (el.parentNode) el.remove();
+                            }, 400);
+                        })(cards[i]);
+                    }
+                }
+            }
+        });
     }
     function addUnwatchedTraces(card, attempt) {
         if (!card) return;
+        _myShowsDirty = true;
         attempt = attempt || 0;
         var showName = card.original_name || card.original_title || card.title || card.name;
         var needle = card.myshowsId || showName;
@@ -2915,14 +3106,15 @@
                 cardElement.dataset.removing = "true";
                 var releasedEpisodes = cardData.released_count;
                 var totalEpisodes = cardData.total_count;
+                if (!releasedEpisodes && cardData.progress_marker && cardData.progress_marker.indexOf("/") > -1) releasedEpisodes = parseInt(cardData.progress_marker.split("/")[1], 10);
                 if (releasedEpisodes) {
                     var newProgressMarker = releasedEpisodes + "/" + releasedEpisodes;
                     cardData.progress_marker = newProgressMarker;
                     updateCardWithAnimation(cardElement, newProgressMarker, "myshows-progress");
                     cardData.remaining = 0;
                     updateCardWithAnimation(cardElement, "0", "myshows-remaining");
-                    var parentSection = cardElement.closest(".items-line");
-                    var allCards = parentSection.querySelectorAll(".card");
+                    var parentSection = cardElement.closest(".items-line") || cardElement.parentNode;
+                    var allCards = parentSection ? parentSection.querySelectorAll(".card") : [];
                     var currentIndex = [].slice.call(allCards).indexOf(cardElement);
                     setTimeout(function() {
                         removeCompletedCard(cardElement, showName, parentSection, currentIndex);
@@ -2933,11 +3125,12 @@
         }
     }
     function removeCompletedCard(cardElement, showName, parentSection, cardIndex) {
+        if (!parentSection) parentSection = cardElement.parentNode;
         var isCurrentlyFocused = cardElement.classList.contains("focus");
         var nextCard = null;
         if (isCurrentlyFocused) {
             var allCards = parentSection.querySelectorAll(".card");
-            if (cardIndex < allCards.length - 1) nextCard = allCards[cardIndex + 1]; else if (cardIndex > 0) nextCard = allCards[cardIndex - 1];
+            if (cardIndex > 0) nextCard = allCards[cardIndex - 1]; else if (cardIndex < allCards.length - 1) nextCard = allCards[cardIndex + 1];
         }
         cardElement.style.transition = "opacity 0.5s ease, transform 0.5s ease";
         cardElement.style.opacity = "0";
@@ -2982,10 +3175,65 @@
         }
         return null;
     }
+    function sameShow(a, b) {
+        if (!a || !b) return false;
+        if (a.myshowsId && b.myshowsId && a.myshowsId === b.myshowsId) return true;
+        var an = [ a.name, a.title, a.original_name, a.original_title ];
+        var bn = [ b.name, b.title, b.original_name, b.original_title ];
+        for (var i = 0; i < an.length; i++) {
+            if (!an[i]) continue;
+            var x = String(an[i]).toLowerCase();
+            for (var j = 0; j < bn.length; j++) if (bn[j] && String(bn[j]).toLowerCase() === x) return true;
+        }
+        return false;
+    }
+    function showAlreadyInLine(line, showData) {
+        var section = findMyShowsSection();
+        if (section) {
+            var cards = section.querySelectorAll(".card");
+            for (var i = 0; i < cards.length; i++) if (sameShow(cards[i].card_data, showData)) return true;
+        }
+        var arr = line.data && line.data.results || [];
+        for (var k = 0; k < arr.length; k++) if (sameShow(arr[k], showData)) return true;
+        return false;
+    }
+    function insertViaLine(showData) {
+        var line = _myShowsLine;
+        if (!line || !line.emit || !line.render || !line.data) return false;
+        var html, dom;
+        try {
+            html = line.render(true);
+            dom = html && (html[0] || html) || null;
+        } catch (e) {
+            return false;
+        }
+        if (!dom || !document.body.contains(dom)) return false;
+        if (showAlreadyInLine(line, showData)) return true;
+        try {
+            line.emit("createAndAppend", showData);
+            var item = line.items && line.items[line.items.length - 1];
+            if (item && item.render) {
+                var el = item.render(true);
+                var elDom = el && (el[0] || el);
+                if (elDom) {
+                    elDom.card_data = showData;
+                    if (elDom.parentNode) {
+                        var moreBtn = elDom.parentNode.querySelector(".card-more");
+                        if (moreBtn && moreBtn !== elDom) elDom.parentNode.insertBefore(elDom, moreBtn);
+                    }
+                }
+                addProgressMarkerToCard(el, showData);
+            }
+        } catch (e) {
+            return false;
+        }
+        return true;
+    }
     function insertNewCardIntoMyShowsSection(showData, retryCount) {
         if (showData && showData._renderToken !== void 0 && showData._renderToken !== _profileRenderToken) return;
         if (showData && !showData.release_date && showData.first_air_date) showData.release_date = showData.first_air_date;
         showData.name || showData.title, showData.progress_marker, showData.remaining, showData.next_episode;
+        if (insertViaLine(showData)) return;
         if (typeof retryCount === "undefined") retryCount = 0;
         if (retryCount > 5) {
             showData.name || showData.title;
@@ -3052,7 +3300,7 @@
     }
     function addProgressMarkerStyles() {
         var style = document.createElement("style");
-        style.textContent = [ ".myshows-progress {", "    position: absolute; left: 0em; bottom: 0em;", "    padding: 0.2em 0.4em; font-size: 1.2em; border-radius: 0.5em;", "    font-weight: bold; z-index: 2; box-shadow: 0 2px 8px rgba(0,0,0,0.15);", "    background: #4CAF50; color: #fff;", "    transition: all 0.3s ease, transform 0.15s ease !important;", "    will-change: transform, color, background-color;", "}", "@keyframes digitFlip {", "    0%   { transform: translateY(0) scale(1); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }", "    50%  { transform: scale(1); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }", "    100% { transform: translateY(0) scale(1); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }", "}", "@keyframes pulse {", "    0%   { transform: scale(1); }", "    50%  { transform: scale(1); }", "    100% { transform: scale(1); }", "}", ".digit-animating { animation: digitFlip 0.6s ease; }", ".marker-update   { animation: pulse 0.6s ease; }", ".counter-animating { animation: counterPulse 0.8s ease; }", "@keyframes counterPulse {", "    0%   { transform: scale(1); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }", "    25%  { transform: scale(1); box-shadow: 0 4px 12px rgba(0,0,0,0.25); }", "    50%  { transform: scale(1); box-shadow: 0 3px 10px rgba(0,0,0,0.2); }", "    100% { transform: scale(1); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }", "}", ".myshows-remaining {", "    position: absolute; right: 0em; top: 0em;", "    padding: 0.2em 0.4em; font-size: 1.2em; border-radius: 1em;", "    font-weight: bold; z-index: 2;", "    background: rgba(0,0,0,0.5); color: #fff; transition: all 0.3s ease;", "}", ".myshows-next-episode {", "    position: absolute; left: 0em; bottom: 1.5em;", "    padding: 0.2em 0.4em; font-size: 1.2em; border-radius: 0.5em;", "    font-weight: bold; z-index: 2; box-shadow: 0 2px 8px rgba(0,0,0,0.15);", "    letter-spacing: 0.04em; line-height: 1.1;", "    background: #2196F3; color: #fff; transition: all 0.3s ease;", "}", ".myshows-explorer-next {", "    margin: 0 0 1em;", "    font-size: 1.15em; font-weight: 300;", "}", ".full-start-new__poster { position: relative; }", ".full-start-new__poster .myshows-progress,", ".full-start-new__poster .myshows-next-episode {", "    position: absolute; left: 0.5em; z-index: 3;", "}", ".full-start-new__poster .myshows-progress,", ".full-start-new__poster .myshows-remaining,", ".full-start-new__poster .myshows-next-episode {", "    transition: all 0.3s ease !important;", "    will-change: transform, color, background-color;", "}", ".full-start-new__poster .myshows-progress.digit-animating,", ".full-start-new__poster .myshows-remaining.digit-animating,", ".full-start-new__poster .myshows-next-episode.digit-animating {", "    animation: digitFlip 0.6s ease;", "}", ".full-start-new__poster .marker-update { animation: gentlePulse 0.6s ease; }", "@keyframes gentlePulse {", "    0%   { transform: scale(1); }", "    50%  { transform: scale(1); }", "    100% { transform: scale(1); }", "}", ".full-start-new__poster .myshows-progress    { bottom: 0.5em; }", ".full-start-new__poster .myshows-next-episode { bottom: 2em; }", "body.true--mobile.orientation--portrait .full-start-new__poster .myshows-progress    { bottom: 15em; }", "body.true--mobile.orientation--portrait .full-start-new__poster .myshows-next-episode { bottom: 17em; }", "body.true--mobile.orientation--landscape .full-start-new__poster .myshows-progress    { bottom: 2.5em; }", "body.true--mobile.orientation--landscape .full-start-new__poster .myshows-next-episode { bottom: 4em; }", "@media screen and (min-width: 580px) and (max-width: 1024px) {", "    body.true--mobile .full-start-new__poster .myshows-progress    { bottom: 2.5em; font-size: 1.1em; }", "    body.true--mobile .full-start-new__poster .myshows-next-episode { bottom: 4em;   font-size: 1.1em; }", "}", "body.glass--style.platform--browser .card .myshows-progress,", "body.glass--style.platform--nw .card .myshows-progress,", "body.glass--style.platform--apple .card .д-progress {", "    background-color: rgba(76,175,80,0.8);", "    -webkit-backdrop-filter: blur(1em); backdrop-filter: blur(1em);", "}", "body.glass--style.platform--browser .card .myshows-next-episode,", "body.glass--style.platform--nw .card .myshows-next-episode,", "body.glass--style.platform--apple .card .myshows-next-episode {", "    background-color: rgba(33,150,243,0.8);", "    -webkit-backdrop-filter: blur(1em); backdrop-filter: blur(1em);", "}", ".myshows-progress.marker-update,", ".myshows-next-episode.marker-update { font-weight: 900; animation: gentleAppear 0.4s ease; }", "@keyframes gentleAppear {", "    0%   { opacity: 0; transform: translateY(10px); }", "    100% { opacity: 1; transform: translateY(0); }", "}", "@keyframes gentlePulse {", "    0%   { transform: scale(1); }", "    50%  { transform: scale(1); }", "    100% { transform: scale(1); }", "}", ".scale-animation { animation: gentlePulse 0.6s ease; }", 'body[data-myshows-badge-style="2"] .card .myshows-next-episode,', 'body[data-myshows-badge-style="2"] .full-start-new__poster .myshows-next-episode {', "    left: 0; bottom: 0; border-radius: 0 0.83em;", "    background: rgba(0,0,0,0.5); box-shadow: none;", "}", 'body[data-myshows-badge-style="2"] .card .myshows-progress,', 'body[data-myshows-badge-style="2"] .full-start-new__poster .myshows-progress {', "    left: auto; right: 0; bottom: 0; border-radius: 0.83em 0;", "    background: rgba(0,0,0,0.5); box-shadow: none;", "}", 'body[data-myshows-badge-style="2"].glass--style .card .myshows-progress,', 'body[data-myshows-badge-style="2"].glass--style .card .myshows-next-episode {', "    background-color: rgba(0,0,0,0.5);", "    -webkit-backdrop-filter: none; backdrop-filter: none;", "}", 'body[data-myshows-badge-style="2"] .card .myshows-remaining,', 'body[data-myshows-badge-style="2"] .full-start-new__poster .myshows-remaining {', "    right: 0; top: 0; border-radius: 0 0.83em;", "}", 'body[data-myshows-badge-style="2"][data-status-badge-style="2"] .card .view--has-status .myshows-remaining {', "    top: 1.25em; border-radius: 0.83em 0 0 0.83em;", "}", 'body[data-myshows-badge-style="2"] .card .card__quality {', "    left: 0; border-radius: 0 0.75em 0.75em 0;", "}", 'body[data-myshows-badge-style="2"] .card .card__vote {', "    right: 0; bottom: 1.5em; left: auto; top: auto;", "    padding: 0.2em 0.4em; font-size: 1.2em; font-weight: bold;", "    background: rgba(0,0,0,0.5); color: #fff;", "    border-radius: 0.83em 0 0 0.83em;", "}", 'body[data-myshows-badge-style="2"].true--mobile.orientation--portrait .full-start-new__poster .myshows-next-episode { bottom: 15em; }', 'body[data-myshows-badge-style="2"].true--mobile.orientation--landscape .full-start-new__poster .myshows-next-episode { bottom: 2.5em; }', "@media screen and (min-width: 580px) and (max-width: 1024px) {", '    body[data-myshows-badge-style="2"].true--mobile .full-start-new__poster .myshows-next-episode { bottom: 2.5em; font-size: 1.1em; }', "}" ].join("\n");
+        style.textContent = [ ".myshows-progress {", "    position: absolute; left: 0em; bottom: 0em;", "    padding: 0.2em 0.4em; font-size: 1.2em; border-radius: 0.5em;", "    font-weight: bold; z-index: 2; box-shadow: 0 2px 8px rgba(0,0,0,0.15);", "    background: #4CAF50; color: #fff;", "    transition: all 0.3s ease, transform 0.15s ease !important;", "    will-change: transform, color, background-color;", "}", "@keyframes digitFlip {", "    0%   { transform: translateY(0) scale(1); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }", "    50%  { transform: scale(1); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }", "    100% { transform: translateY(0) scale(1); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }", "}", "@keyframes pulse {", "    0%   { transform: scale(1); }", "    50%  { transform: scale(1); }", "    100% { transform: scale(1); }", "}", ".digit-animating { animation: digitFlip 0.6s ease; }", ".marker-update   { animation: pulse 0.6s ease; }", ".counter-animating { animation: counterPulse 0.8s ease; }", "@keyframes counterPulse {", "    0%   { transform: scale(1); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }", "    25%  { transform: scale(1); box-shadow: 0 4px 12px rgba(0,0,0,0.25); }", "    50%  { transform: scale(1); box-shadow: 0 3px 10px rgba(0,0,0,0.2); }", "    100% { transform: scale(1); box-shadow: 0 2px 8px rgba(0,0,0,0.15); }", "}", ".myshows-remaining {", "    position: absolute; right: 0em; top: 0em;", "    padding: 0.2em 0.4em; font-size: 1.2em; border-radius: 1em;", "    font-weight: bold; z-index: 2;", "    background: rgba(0,0,0,0.5); color: #fff; transition: all 0.3s ease;", "}", ".myshows-next-episode {", "    position: absolute; left: 0em; bottom: 1.5em;", "    padding: 0.2em 0.4em; font-size: 1.2em; border-radius: 0.5em;", "    font-weight: bold; z-index: 2; box-shadow: 0 2px 8px rgba(0,0,0,0.15);", "    letter-spacing: 0.04em; line-height: 1.1;", "    background: #2196F3; color: #fff; transition: all 0.3s ease;", "}", ".myshows-explorer-next {", "    margin: 0 0 1em;", "    font-size: 1.15em; font-weight: 300;", "}", ".full-start-new__poster { position: relative; }", ".full-start-new__poster .myshows-progress,", ".full-start-new__poster .myshows-next-episode {", "    position: absolute; left: 0.5em; z-index: 3;", "}", ".full-start-new__poster .myshows-progress,", ".full-start-new__poster .myshows-remaining,", ".full-start-new__poster .myshows-next-episode {", "    transition: all 0.3s ease !important;", "    will-change: transform, color, background-color;", "}", ".full-start-new__poster .myshows-progress.digit-animating,", ".full-start-new__poster .myshows-remaining.digit-animating,", ".full-start-new__poster .myshows-next-episode.digit-animating {", "    animation: digitFlip 0.6s ease;", "}", ".full-start-new__poster .marker-update { animation: gentlePulse 0.6s ease; }", "@keyframes gentlePulse {", "    0%   { transform: scale(1); }", "    50%  { transform: scale(1); }", "    100% { transform: scale(1); }", "}", ".full-start-new__poster .myshows-progress    { bottom: 0.5em; }", ".full-start-new__poster .myshows-next-episode { bottom: 2em; }", "body.true--mobile.orientation--portrait .full-start-new__poster .myshows-progress    { bottom: 15em; }", "body.true--mobile.orientation--portrait .full-start-new__poster .myshows-next-episode { bottom: 17em; }", "body.true--mobile.orientation--landscape .full-start-new__poster .myshows-progress    { bottom: 2.5em; }", "body.true--mobile.orientation--landscape .full-start-new__poster .myshows-next-episode { bottom: 4em; }", "@media screen and (min-width: 580px) and (max-width: 1024px) {", "    body.true--mobile .full-start-new__poster .myshows-progress    { bottom: 2.5em; font-size: 1.1em; }", "    body.true--mobile .full-start-new__poster .myshows-next-episode { bottom: 4em;   font-size: 1.1em; }", "}", "body.glass--style.platform--browser .card .myshows-progress,", "body.glass--style.platform--nw .card .myshows-progress,", "body.glass--style.platform--apple .card .д-progress {", "    background-color: rgba(76,175,80,0.8);", "    -webkit-backdrop-filter: blur(1em); backdrop-filter: blur(1em);", "}", "body.glass--style.platform--browser .card .myshows-next-episode,", "body.glass--style.platform--nw .card .myshows-next-episode,", "body.glass--style.platform--apple .card .myshows-next-episode {", "    background-color: rgba(33,150,243,0.8);", "    -webkit-backdrop-filter: blur(1em); backdrop-filter: blur(1em);", "}", ".myshows-progress.marker-update,", ".myshows-next-episode.marker-update { font-weight: 900; animation: gentleAppear 0.4s ease; }", "@keyframes gentleAppear {", "    0%   { opacity: 0; transform: translateY(10px); }", "    100% { opacity: 1; transform: translateY(0); }", "}", "@keyframes gentlePulse {", "    0%   { transform: scale(1); }", "    50%  { transform: scale(1); }", "    100% { transform: scale(1); }", "}", ".scale-animation { animation: gentlePulse 0.6s ease; }", 'body[data-myshows-badge-style="2"] .card .myshows-next-episode,', 'body[data-myshows-badge-style="2"] .full-start-new__poster .myshows-next-episode {', "    left: 0; bottom: 0; border-radius: 0 0.83em;", "    background: rgba(0,0,0,0.5); box-shadow: none;", "}", 'body[data-myshows-badge-style="2"] .card .myshows-progress,', 'body[data-myshows-badge-style="2"] .full-start-new__poster .myshows-progress {', "    left: auto; right: 0; bottom: 0; border-radius: 0.83em 0;", "    background: rgba(0,0,0,0.5); box-shadow: none;", "}", 'body[data-myshows-badge-style="2"].glass--style .card .myshows-progress,', 'body[data-myshows-badge-style="2"].glass--style .card .myshows-next-episode {', "    background-color: rgba(0,0,0,0.5);", "    -webkit-backdrop-filter: none; backdrop-filter: none;", "}", 'body[data-myshows-badge-style="2"] .card .myshows-remaining,', 'body[data-myshows-badge-style="2"] .full-start-new__poster .myshows-remaining {', "    right: 0; top: 0; border-radius: 0 0.83em;", "}", 'body[data-myshows-badge-style="2"][data-status-badge-style="2"] .card .view--has-status .myshows-remaining {', "    top: 1.25em; border-radius: 0.83em 0 0 0.83em;", "}", 'body[data-myshows-badge-style="2"] .card .card__quality {', "    left: 0; border-radius: 0 0.75em 0.75em 0;", "}", 'body[data-myshows-badge-style="2"] .card .card__vote {', "    right: 0; bottom: 1.5em; left: auto; top: auto;", "    padding: 0.2em 0.4em; font-size: 1.2em; font-weight: bold;", "    background: rgba(0,0,0,0.5); color: #fff;", "    border-radius: 0.83em 0 0 0.83em;", "}", 'body[data-myshows-badge-style="2"].true--mobile.orientation--portrait .full-start-new__poster .myshows-next-episode { bottom: 15em; }', 'body[data-myshows-badge-style="2"].true--mobile.orientation--landscape .full-start-new__poster .myshows-next-episode { bottom: 2.5em; }', "@media screen and (min-width: 580px) and (max-width: 1024px) {", '    body[data-myshows-badge-style="2"].true--mobile .full-start-new__poster .myshows-next-episode { bottom: 2.5em; font-size: 1.1em; }', "}", ".full-episode__img, .season-episode__img, .online-prestige__img, .myshows-check-anchor { position: relative; }", ".myshows-episode-checked {", "    position: absolute; right: 0.4em; bottom: 0.4em;", "    width: 1.6em; height: 1.6em; border-radius: 50%;", "    background: #4CAF50; color: #fff; z-index: 3;", "    display: flex; align-items: center; justify-content: center;", "    box-shadow: 0 2px 6px rgba(0,0,0,0.4);", "    animation: msCheckPop 0.25s ease;", "}", '.myshows-episode-checked::after { content: "\\2713"; font-size: 1em; font-weight: bold; line-height: 1; }', "@keyframes msCheckPop { 0% { transform: scale(0); } 70% { transform: scale(1.15); } 100% { transform: scale(1); } }" ].join("\n");
         // Патч: CSS для скрытия значков через data-атрибуты на body
         var styleHide = document.createElement("style");
         styleHide.textContent = [
@@ -3062,6 +3310,159 @@
         ].join("\n");
         document.head.appendChild(styleHide);
         document.head.appendChild(style);
+    }
+    function parseAirDate(airDate) {
+        if (!airDate) return NaN;
+        var s = String(airDate);
+        var t = new Date(s).getTime();
+        if (!isNaN(t)) return t;
+        var m = s.match(/(\d{4})-(\d{2})-(\d{2})/);
+        return m ? new Date(m[1] + "/" + m[2] + "/" + m[3]).getTime() : NaN;
+    }
+    function isEpisodeWatchedMyShows(episodeId, airDate) {
+        if (!episodeId) return false;
+        var t = parseAirDate(airDate);
+        if (isNaN(t) || t > Date.now()) return false;
+        return !_unwatchedEpisodeIds[parseInt(episodeId)];
+    }
+    function buildEpisodeLookupForShow(tmdbKey) {
+        var map = Lampa.Storage.get(MAP_KEY, {});
+        var lookup = {};
+        for (var k in map) {
+            if (!map.hasOwnProperty(k)) continue;
+            var e = map[k];
+            if (!e || String(e.tmdbId) !== String(tmdbKey)) continue;
+            if (e.seasonNumber === void 0 || e.episodeNumber === void 0) continue;
+            lookup["h:" + e.hash] = e;
+            lookup["se:" + e.seasonNumber + "_" + e.episodeNumber] = e;
+        }
+        return lookup;
+    }
+    function decorateOneEpisodeCard(cardEl, lookup, fallbackSeason, strict) {
+        var entry = null;
+        var tl = cardEl.querySelector(".time-line[data-hash]");
+        if (tl) {
+            var hash = tl.getAttribute("data-hash");
+            entry = lookup["h:" + hash];
+        }
+        if (!entry) {
+            var numEl = cardEl.querySelector(".full-episode__num, .season-episode__episode-number");
+            var num = numEl ? parseInt((numEl.textContent || "").replace(/\D/g, ""), 10) : NaN;
+            var season = fallbackSeason;
+            if (!isNaN(num) && season) entry = lookup["se:" + season + "_" + num];
+        }
+        var imgBox = cardEl.querySelector(".full-episode__img, .season-episode__img, .online-prestige__img");
+        if (!imgBox) {
+            var img = cardEl.querySelector("img");
+            if (img && img.parentNode && img.parentNode !== cardEl) imgBox = img.parentNode;
+        }
+        if (!imgBox) imgBox = cardEl;
+        imgBox.classList.add("myshows-check-anchor");
+        var existing = imgBox.querySelector(".myshows-episode-checked");
+        var watched = strict ? entry && !!checkedEpisodes[parseInt(entry.episodeId)] : entry && isEpisodeWatchedMyShows(entry.episodeId, entry.airDate);
+        if (watched) {
+            if (!existing) {
+                var badge = document.createElement("div");
+                badge.className = "myshows-episode-checked";
+                imgBox.appendChild(badge);
+                if (imgBox === cardEl) {
+                    var thumb = cardEl.querySelector("img");
+                    if (thumb && thumb.offsetWidth && thumb.offsetWidth < cardEl.offsetWidth * .6) badge.style.right = cardEl.offsetWidth - thumb.offsetLeft - thumb.offsetWidth + 6 + "px";
+                }
+            }
+        } else if (existing) existing.remove();
+    }
+    function episodeLineSeason(cardEl) {
+        var line = cardEl.parentNode;
+        while (line && line.classList && !line.classList.contains("items-line")) line = line.parentNode;
+        if (line && line.querySelector) {
+            var t = line.querySelector(".items-line__title");
+            if (t) {
+                var m = (t.textContent || "").match(/(\d+)/);
+                if (m) return parseInt(m[1], 10);
+            }
+        }
+        var act = Lampa.Activity.active && Lampa.Activity.active();
+        if (act && act.season) return parseInt(act.season, 10);
+        return null;
+    }
+    function nearestCardAnchor(tlEl) {
+        var n = tlEl, depth = 0;
+        while (n && depth < 8) {
+            if (n.classList) {
+                if (n.classList.contains("card-watched")) return null;
+                if (n.classList.contains("full-episode") || n.classList.contains("season-episode") || n.classList.contains("online-prestige")) return n;
+                if (n.classList.contains("selector")) return n.classList.contains("card") ? null : n;
+            }
+            n = n.parentNode;
+            depth++;
+        }
+        return null;
+    }
+    function collectEpisodeCards() {
+        var set = [], seen = [];
+        function add(el) {
+            if (el && seen.indexOf(el) === -1) {
+                seen.push(el);
+                set.push(el);
+            }
+        }
+        var direct = document.querySelectorAll(".full-episode, .season-episode, .online-prestige");
+        for (var i = 0; i < direct.length; i++) add(direct[i]);
+        var tls = document.querySelectorAll(".time-line[data-hash]");
+        for (var j = 0; j < tls.length; j++) add(nearestCardAnchor(tls[j]));
+        return set;
+    }
+    function decorateEpisodeCards() {
+        if (!getProfileSetting("myshows_token", "")) return;
+        if (!_unwatchedEpisodeIdsReady) return;
+        var cards = collectEpisodeCards();
+        if (!cards.length) return;
+        var card = getCurrentCard();
+        if (!card || !card.id || isMovieContent(card)) {
+            removeAllEpisodeBadges();
+            return;
+        }
+        var status = getCardStatusCache(card.id, false);
+        if (status !== "watching") {
+            removeAllEpisodeBadges();
+            return;
+        }
+        var tmdbKey = String(card.id);
+        var lookup = buildEpisodeLookupForShow(tmdbKey);
+        var stale = false;
+        for (var key in lookup) if (lookup.hasOwnProperty(key) && key.indexOf("se:") === 0 && lookup[key].airDate === void 0) {
+            stale = true;
+            break;
+        }
+        if ((!hasOwn(lookup) || stale) && !_episodeMapAttempted[tmdbKey]) {
+            _episodeMapAttempted[tmdbKey] = true;
+            ensureHashMap(card, getProfileSetting("myshows_token", ""), function() {
+                scheduleEpisodeBadgeDecorate();
+            });
+            return;
+        }
+        var strict = !!_pendingWatchedShows[tmdbKey];
+        for (var i = 0; i < cards.length; i++) decorateOneEpisodeCard(cards[i], lookup, episodeLineSeason(cards[i]), strict);
+    }
+    var _episodeMapAttempted = {};
+    function hasOwn(obj) {
+        for (var k in obj) if (obj.hasOwnProperty(k)) return true;
+        return false;
+    }
+    function removeAllEpisodeBadges() {
+        var b = document.querySelectorAll(".myshows-episode-checked");
+        for (var i = 0; i < b.length; i++) b[i].remove();
+    }
+    var _episodeBadgeTimer = null;
+    function scheduleEpisodeBadgeDecorate() {
+        if (_episodeBadgeTimer) clearTimeout(_episodeBadgeTimer);
+        _episodeBadgeTimer = setTimeout(function() {
+            _episodeBadgeTimer = null;
+            try {
+                decorateEpisodeCards();
+            } catch (e) {}
+        }, 150);
     }
     function addMyShowsData(data, oncomplite) {
         if (getProfileSetting("myshows_view_in_main", true)) {
@@ -4776,6 +5177,7 @@
     }
     Lampa.Listener.follow("line", function(event) {
         if (event.data && event.data.title && event.data.title.indexOf("MyShows") !== -1) if (event.type === "create") {
+            _myShowsLine = event.line || null;
             if (event.data && event.data.results && event.line) event.data.results.forEach(function(show) {
                 if (!show.ready && event.line.append) event.line.append(show);
             });
