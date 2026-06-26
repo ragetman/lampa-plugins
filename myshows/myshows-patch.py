@@ -10,6 +10,7 @@
 # Патч 7    — инициализация badge-атрибутов сразу при старте плагина
 # Патч 8    — корректное отображение состояния значков в UI настроек
 # Патч 9    — PAGE_SIZE 20→12 для Хочу посмотреть / Непросмотренные
+# Патч 10   — исправление saveCacheToServer: XHR вместо native() (414 fix)
 
 import sys
 
@@ -643,6 +644,56 @@ if P9E_OLD in src:
     print('Patch 9e OK')
 else:
     errors.append('Patch 9e: якорь не найден — buildLines PAGE_SIZE')
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ПАТЧ 10 — исправляем saveCacheToServer: заменяем Lampa.Reguest().native() на
+#            чистый XMLHttpRequest, чтобы JSON тело не попадало в URL (414 error)
+# ═══════════════════════════════════════════════════════════════════════════════
+P10_OLD = """            } else {
+                var network = new Lampa.Reguest;
+                network.native(uri, function(response) {
+                    if (response.success) {
+                        if (callback) callback(true);
+                    } else {
+                        response.msg;
+                        if (callback) callback(false);
+                    }
+                }, function(error) {
+                    if (callback) callback(false);
+                }, data, {
+                    headers: JSON_HEADERS,
+                    method: "POST"
+                });
+            }"""
+
+P10_NEW = """            } else {
+                var xhr = new XMLHttpRequest();
+                xhr.open('POST', uri, true);
+                xhr.setRequestHeader('Content-Type', 'application/json');
+                xhr.onload = function() {
+                    try {
+                        var response = JSON.parse(xhr.responseText);
+                        if (response.success) {
+                            if (callback) callback(true);
+                        } else {
+                            if (callback) callback(false);
+                        }
+                    } catch(e) {
+                        if (callback) callback(false);
+                    }
+                };
+                xhr.onerror = function() {
+                    if (callback) callback(false);
+                };
+                xhr.send(data);
+            }"""
+
+if P10_OLD in src:
+    src = src.replace(P10_OLD, P10_NEW, 1)
+    print('Patch 10 OK')
+else:
+    errors.append('Patch 10: якорь не найден — saveCacheToServer network.native')
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
