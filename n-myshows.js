@@ -274,20 +274,25 @@
                 Lampa.Storage.set(profileKeyFor("myshows_" + path, profileId), cacheData);
                 if (callback) callback(true);
             } else {
-                var network = new Lampa.Reguest;
-                network.native(uri, function(response) {
-                    if (response.success) {
-                        if (callback) callback(true);
-                    } else {
-                        response.msg;
+                var xhr = new XMLHttpRequest();
+                xhr.open('POST', uri, true);
+                xhr.setRequestHeader('Content-Type', 'application/json');
+                xhr.onload = function() {
+                    try {
+                        var response = JSON.parse(xhr.responseText);
+                        if (response.success) {
+                            if (callback) callback(true);
+                        } else {
+                            if (callback) callback(false);
+                        }
+                    } catch(e) {
                         if (callback) callback(false);
                     }
-                }, function(error) {
+                };
+                xhr.onerror = function() {
                     if (callback) callback(false);
-                }, data, {
-                    headers: JSON_HEADERS,
-                    method: "POST"
-                });
+                };
+                xhr.send(data);
             }
         } catch (e) {
             e.message;
